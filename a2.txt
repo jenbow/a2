@@ -1,0 +1,174 @@
+# 1) How many unique customers reviewed products in this file?
+benbow@f6linuxA5:~/a2$ cut -f 2 ../amazon_reviews_us_Books_v1_02.tsv | tail +2 |sort -u | wc -l
+1502380
+
+# How many unique product ids were reviewed in this file?
+benbow@f6linuxA5:~/a2$ cut -f 4 ../amazon_reviews_us_Books_v1_02.tsv | tail +2 | sort -u | wc -l
+779733
+
+# How many unique product titles were reviewed in this file? Is it the same as the number of product ids? 
+benbow@f6linuxA5:~/a2$ cut -f 6 ../amazon_reviews_us_Books_v1_02.tsv | tail +2 | sort -u | wc -l
+713711
+# No, there are 66,022 fewer product names than ids, indicating that different texts can share the same book title or that
+# the same book may be assigned multiple ids (perhaps erroneously) 
+
+# 2) Select 100 different customers ids that did more than one review. 
+#    Put all the helpfulness scores and review scores (2 columns in each file) in different files 
+#    named after CUSTOMERS/customerid.txt (replace customerid with the customer id).
+cut -f 2 ../amazon_reviews_us_Books_v1_02.tsv | tail -n +2 | head -n 5000 | sort -n | uniq -c | sort -rn | head -n 100 > cust_ids.tmp
+
+tr -s " " "\t" < cust_ids.tmp | cut -f 3 > cust_n100.txt
+
+cut -f 2,8,9 ../amazon_reviews_us_Books_v1_02.tsv > amazon-reviews-cust_id-star_rating-and-helpful_votes.tmp
+
+for id in $(cat cust_n100.txt)
+do
+
+    printf "${id}\n"
+
+    grep -w "^${id}" amazon-reviews-cust_id-star_rating-and-helpful_votes.tmp | cut -f 2,3 > CUSTOMERS/${id}.txt
+
+done 
+
+# 3) Repeat above for product IDs
+cut -f 4 ../amazon_reviews_us_Books_v1_02.tsv | tail -n +2 | head -n 5000 | sort -n | uniq -c | sort -rn | head -n 100 > prod_ids.tmp
+
+tr -s " " "\t" < prod_ids.tmp | cut -f 3 > prod_n100.txt
+
+cut -f 4,8,9 ../amazon_reviews_us_Books_v1_02.tsv > amazon-reviews-prod_id-star_rating-and-helpful_votes.tmp
+
+mkdir PRODUCTS
+
+for id in $(cat prod_n100.txt)
+do
+
+    printf "${id}\n"
+
+    grep -w "^${id}" amazon-reviews-prod_id-star_rating-and-helpful_votes.tmp | cut -f 2,3 > PRODUCTS/${id}.txt
+
+done
+
+
+# 4-6) creating new aliases
+
+nano ~/.bashrc
+
+# Added the following to the bottom of the .bashrc file
+alias l="ls -latr"
+alias w="ls -la | wc"
+
+# loading file w changes
+source ~/.bashrc
+
+# 7) using the new w alias to confirm that 100 files exist for customers and products
+cd CUSTOMERS
+w
+
+    103     920    6007
+
+cd ../PRODUCTS
+w
+
+    103     920    6207
+
+# 8) correlations
+# install datamash
+wget http://ftp.gnu.org/gnu/datamash/datamash-1.3.tar.gz
+tar -xzf datamash-1.3.tar.gz
+cd datamash-1.3/
+./configure
+make
+make check
+
+# Compute the correlations for customers 
+for id in $(cat cust_n100.txt)
+do
+
+    datamash-1.3/datamash -W ppearson 1:2 < CUSTOMERS/${id}.txt
+
+done > customer-correlation-values.tmp
+
+paste cust_n100.txt customer-correlation-values.tmp > customer-correlation-values.tsv
+
+rm customer-correlation-values.tmp
+
+# Compute correlations for products
+for id in $(cat prod_n100.txt)
+do
+
+    datamash-1.3/datamash -W ppearson 1:2 < PRODUCTS/${id}.txt
+
+done > product-correlation-values.tmp
+
+paste prod_n100.txt product-correlation-values.tmp > product-correlation-values.tsv
+
+rm product-correlation-values.tmp
+
+# most correlated customer ID
+tr -d "-" < customer-correlation-values.tsv | sort -nrk 2 | head -n 1
+35560945	0.99661589554012
+
+# least correlated customer ID
+tr -d "-" < customer-correlation-values.tsv | grep -v "nan" | sort -nk 2 | head -n 1
+52778209	0.0052512712616611
+
+# most correlated product
+tr -d "-" < product-correlation-values.tsv | sort -nrk 2 | head -n 1
+B000B5RXSG	1
+
+# least correlated product
+tr -d "-" < product-correlation-values.tsv | grep -v "nan" | sort -nk 2 | head -n 1
+0743226712	0.001340495949318
+
+
+## 9) Used a short R script to calculate the mean customer helpfulness values
+
+cat calc-mean.R | sed 's/^/# /'
+# args = commandArgs(trailingOnly = TRUE)
+#
+# vec <- scan(args)
+#
+# cat(mean(vec), "\n")
+
+for id in $(cat cust_n100.txt)
+do
+    cut -f 2 CUSTOMERS/${id}.txt > ${id}.tmp
+    Rscript calc-mean.R ${id}.tmp
+    rm ${id}.tmp
+done > customer-helpulness-mean-values.tmp
+
+paste cust_n100.txt customer-helpulness-mean-values.tmp > customer-helpulness-mean-values.tsv
+
+rm customer-helpulness-mean-values.tmp
+
+# highest customer
+sort -nrk 2 customer-helpulness-mean-values.tsv | head -n 1
+16464880	144
+
+# lowest customer
+sort -nk 2 customer-helpulness-mean-values.tsv | head -n 1
+23801320	0.05426357
+
+
+## 10) Use same R script as above to calculate mean for products
+
+for id in $(cat prod_n100.txt)
+do
+
+    cut -f 1 PRODUCTS/${id}.txt > ${id}.tmp
+    Rscript calc-mean.R ${id}.tmp
+    rm ${id}.tmp
+
+done > product-rating-mean-values.tmp
+
+paste prod_n100.txt product-rating-mean-values.tmp > product-rating-mean-values.tsv
+
+rm product-rating-mean-values.tmp
+
+# highest product rating mean review
+sort -nrk 2 product-rating-mean-values.tsv | head -n 1
+1932021116	5
+
+# lowest
+sort -nk 2 product-rating-mean-values.tsv | head -n 1
+1892112000	2.225397
